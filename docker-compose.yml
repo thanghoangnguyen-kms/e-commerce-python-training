@@ -1,0 +1,37 @@
+services:
+  mongo:
+    image: mongo:6.0
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+  mongo-express:
+    image: mongo-express:1
+    container_name: mongo-express
+    restart: always
+    environment:
+      # connect to the 'mongo' service
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      # no Mongo auth
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      # protect the web UI with basic auth
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mongo
+  api:
+    build: .
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on: [mongo]
+    volumes:
+      - ./app:/app/app
+      - ./pyproject.toml:/app/pyproject.toml
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  mongo_data:
