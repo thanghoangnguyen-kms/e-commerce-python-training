@@ -15,7 +15,7 @@ class AuthService:
     async def signup_user(email: str, password: str) -> dict:
         """
         Register a new user.
-        Returns JWT tokens.
+        Returns access token only (expires in 15 minutes).
         """
         # Check if user already exists
         existing_user = await User.find_one(User.email == email)
@@ -26,10 +26,9 @@ class AuthService:
         user = User(email=email, hashed_password=hash_password(password))
         await user.insert()
 
-        # Generate tokens
+        # Generate access token only
         return {
             "access_token": create_token(str(user.id), user.role, settings.access_exp_min),
-            "refresh_token": create_token(str(user.id), user.role, settings.refresh_exp_min),
             "token_type": "bearer"
         }
 
@@ -37,7 +36,7 @@ class AuthService:
     async def login_user(email: str, password: str) -> dict:
         """
         Authenticate a user.
-        Returns JWT tokens if credentials are valid.
+        Returns access token only (expires in 15 minutes).
         """
         user = await User.find_one(User.email == email)
 
@@ -45,10 +44,9 @@ class AuthService:
         if not user or not verify_password(password, user.hashed_password):
             raise HTTPException(401, "Invalid credentials")
 
-        # Generate tokens
+        # Generate access token only
         return {
             "access_token": create_token(str(user.id), user.role, settings.access_exp_min),
-            "refresh_token": create_token(str(user.id), user.role, settings.refresh_exp_min),
             "token_type": "bearer"
         }
 
@@ -76,4 +74,5 @@ class AuthService:
         user.role = "admin"
         await user.save()
         return user
+
 

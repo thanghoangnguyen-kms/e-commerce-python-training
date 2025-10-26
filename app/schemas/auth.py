@@ -35,7 +35,6 @@ class LoginRequest(SignupRequest):
 class TokenResponse(BaseModel):
     """Response schema for authentication tokens."""
     access_token: str = Field(..., example="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
-    refresh_token: str = Field(..., example="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
     token_type: str = Field(default="bearer", example="bearer")
 
     model_config = {
@@ -43,7 +42,6 @@ class TokenResponse(BaseModel):
             "examples": [
                 {
                     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2NzE2YTJiZjhmYzQ4ZjAwMDE2ZDMyNGEiLCJyb2xlIjoidXNlciIsImlhdCI6MTcyOTUzNjE5MSwiZXhwIjoxNzI5NTM3MDkxfQ.xyz",
-                    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2NzE2YTJiZjhmYzQ4ZjAwMDE2ZDMyNGEiLCJyb2xlIjoidXNlciIsImlhdCI6MTcyOTUzNjE5MSwiZXhwIjoxNzI5NjIyNTkxfQ.abc",
                     "token_type": "bearer"
                 }
             ]
@@ -85,4 +83,6 @@ class PromoteUserRequest(BaseModel):
             ]
         }
     }
+
+
 

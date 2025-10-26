@@ -13,13 +13,13 @@ router = APIRouter()
 
 @router.post("/signup", response_model=TokenResponse)
 async def signup(data: SignupRequest):
-    """Register a new user account."""
+    """Register a new user account and receive access token (expires in 15 minutes)."""
     result = await AuthService.signup_user(data.email, data.password)
     return TokenResponse(**result)
 
 @router.post("/login", response_model=TokenResponse)
 async def login(data: LoginRequest):
-    """Authenticate and receive JWT tokens."""
+    """Authenticate and receive access token (expires in 15 minutes)."""
     result = await AuthService.login_user(data.email, data.password)
     return TokenResponse(**result)
 
