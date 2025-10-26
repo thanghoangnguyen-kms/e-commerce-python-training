@@ -11,4 +11,9 @@ class Settings(BaseModel):
     stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     app_env: str = os.getenv("APP_ENV", "dev")
 
+    # Admin user configuration
+    create_default_admin: bool = os.getenv("CREATE_DEFAULT_ADMIN", "true").lower() in ("true", "1", "yes")
+    default_admin_email: str = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@example.com")
+    default_admin_password: str = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")
+
 settings = Settings()

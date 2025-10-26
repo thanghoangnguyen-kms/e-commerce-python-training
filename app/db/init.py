@@ -97,21 +97,6 @@ class DatabaseManager:
 db_manager = DatabaseManager()
 
 
-# Legacy function wrappers for backward compatibility
-async def init_db(mongo_uri: str) -> None:
-    """
-    Initialize database connection.
-    
-    Args:
-        mongo_uri: MongoDB connection string
-    """
-    await db_manager.initialize(mongo_uri)
-
-
-async def close_db() -> None:
-    """Close database connection."""
-    await db_manager.close()
-
 
 async def get_database():
     """

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
-from app.db.init import init_db, close_db
+from app.db.init import db_manager
 from app.api.routers.auth_router import router as auth_router
 from app.api.routers.product_router import router as product_router
 from app.api.routers.cart_router import router as cart_router
@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up E-Commerce API...")
     try:
-        await init_db(settings.mongodb_uri)
+        await db_manager.initialize(settings.mongodb_uri)
         logger.info("Application startup complete")
     except Exception as e:
         logger.error(f"Failed to start application: {e}")
@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down E-Commerce API...")
-    await close_db()
+    await db_manager.close()
     logger.info("Application shutdown complete")
 
 

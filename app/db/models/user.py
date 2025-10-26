@@ -1,5 +1,5 @@
 from beanie import Document, Indexed
-from pydantic import BaseModel, EmailStr
+from pydantic import EmailStr
 from datetime import datetime
 
 class User(Document):
