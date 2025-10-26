@@ -16,4 +16,16 @@ class Settings(BaseModel):
     default_admin_email: str = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@example.com")
     default_admin_password: str = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")
 
+    # CORS configuration
+    # Default allows common frontend dev ports: 3000 (React/Next), 5173 (Vite), 8080 (Vue CLI)
+    cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:8080")
+    cors_allow_credentials: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in ("true", "1", "yes")
+    cors_allow_methods: str = os.getenv("CORS_ALLOW_METHODS", "*")
+    cors_allow_headers: str = os.getenv("CORS_ALLOW_HEADERS", "*")
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Convert comma-separated CORS origins string to list."""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
 settings = Settings()

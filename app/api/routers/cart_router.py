@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.api.deps import get_current_user
 from app.services.cart_service import CartService
-from app.schemas.cart import CartItemRequest
+from app.schemas.cart import CartItemRequest, CartRemoveRequest
 
 router = APIRouter()
 
@@ -24,7 +24,7 @@ async def add_item(data: CartItemRequest, user=Depends(get_current_user)):
     return await CartService.add_item_to_cart(user["sub"], data.product_id, data.qty)
 
 @router.post("/remove")
-async def remove_item(data: CartItemRequest, user=Depends(get_current_user)):
+async def remove_item(data: CartRemoveRequest, user=Depends(get_current_user)):
     """
     Remove an item from the shopping cart.
 

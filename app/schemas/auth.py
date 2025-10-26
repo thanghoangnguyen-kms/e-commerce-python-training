@@ -20,7 +20,15 @@ class SignupRequest(BaseModel):
 
 
 class LoginRequest(SignupRequest):
-    """Request schema for user login."""
+    """
+    Request schema for user login.
+
+    Inherits from SignupRequest since both operations require the same fields:
+    - email: User's email address
+    - password: User's password
+
+    No additional fields needed for login.
+    """
     pass
 
 
