@@ -8,7 +8,7 @@ A modern, production-ready REST API for e-commerce applications built with FastA
 
 ## ✨ Features
 
-- 🔐 **JWT Authentication** - Secure token-based authentication with role-based access control
+- 🔐 **JWT Authentication** - Secure token-based authentication with role-based access control (access tokens expire in 15 minutes)
 - 👥 **User Management** - User registration, login, and profile management
 - 🛒 **Shopping Cart** - Add, remove, and manage cart items
 - 📦 **Product Catalog** - Browse, search, and filter products by category
@@ -16,6 +16,7 @@ A modern, production-ready REST API for e-commerce applications built with FastA
 - 💰 **Payment Integration** - Mock payment system ready for real gateway integration (Stripe-ready)
 - 👨‍💼 **Admin Panel** - Admin-only endpoints for product and order management
 - 📊 **Comprehensive Logging** - Request/response logging middleware
+- 🌐 **CORS Support** - Configured for frontend integration (React, Vue, Vite) in the future.
 - 🐳 **Docker Support** - Fully containerized with Docker Compose
 - 📚 **Auto-generated API Docs** - Interactive Swagger UI and ReDoc
 
@@ -85,8 +86,8 @@ app/
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| POST | `/auth/signup` | Register new user | No |
-| POST | `/auth/login` | Login and get JWT tokens | No |
+| POST | `/auth/signup` | Register new user and get access token (15 min expiry) | No |
+| POST | `/auth/login` | Login and get access token (15 min expiry) | No |
 | GET | `/auth/me` | Get current user info | Yes |
 | POST | `/auth/promote-to-admin` | Promote user to admin | Admin only |
 
@@ -130,6 +131,8 @@ app/
 
 ## 🔐 Authentication
 
+This API uses **JWT (JSON Web Token)** authentication with access tokens that expire after 15 minutes for enhanced security.
+
 ### Getting Started
 
 1. **Sign up for an account:**
@@ -142,11 +145,24 @@ app/
      }'
    ```
 
+   **Response:**
+   ```json
+   {
+     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "token_type": "bearer"
+   }
+   ```
+
 2. **Use the access token:**
    ```bash
    curl http://localhost:8000/auth/me \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
    ```
+
+3. **Token Expiration:**
+   - Access tokens expire after **15 minutes**
+   - After expiration, users must login again to get a new token
+   - This enhances security by limiting the exposure window of stolen tokens
 
 ### Default Admin Account
 
@@ -206,7 +222,12 @@ MONGODB_URI=mongodb://mongo:27017/ecommerce
 JWT_SECRET=your-secret-key-here
 JWT_ALG=HS256
 ACCESS_TOKEN_EXPIRES_MIN=15
-REFRESH_TOKEN_EXPIRES_MIN=1440
+
+# CORS Configuration (comma-separated origins)
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:8080
+CORS_ALLOW_CREDENTIALS=true
+CORS_ALLOW_METHODS=*
+CORS_ALLOW_HEADERS=*
 
 # Admin Defaults
 DEFAULT_ADMIN_EMAIL=admin@example.com
@@ -223,6 +244,18 @@ STRIPE_WEBHOOK_SECRET=
 
 # Environment
 APP_ENV=dev
+```
+
+### CORS Configuration
+
+The API is pre-configured to allow requests from common frontend development ports:
+- **Port 3000** - React (Create React App), Next.js
+- **Port 5173** - Vite (Vue, React, Svelte)
+- **Port 8080** - Vue CLI
+
+To customize allowed origins for your frontend:
+```env
+CORS_ORIGINS=http://localhost:3000,https://yourdomain.com
 ```
 
 ## 📝 Project Structure
@@ -246,14 +279,98 @@ e-commerce/
 │   ├── services/                # Business logic
 │   ├── scripts/                 # CLI scripts
 │   └── main.py                  # Application entry point
+├── tests/
+│   ├── conftest.py              # Test fixtures and configuration
+│   ├── test_auth.py             # Auth service tests
+│   ├── test_cart.py             # Cart service tests
+│   ├── test_checkout_orders.py  # Checkout service tests
+│   ├── test_orders.py           # Order service tests
+│   ├── test_payments.py         # Payment service tests
+│   └── test_products.py         # Product service tests
 ├── docs/                        # Documentation
 ├── docker-compose.yml           # Docker services
 ├── Dockerfile                   # API container
 ├── pyproject.toml               # Python dependencies
+├── pytest.ini                   # Pytest configuration
 ├── .env                         # Environment variables (not in git)
 ├── .env.example                 # Environment template
 └── README.md                    # This file
 ```
+
+## 🧪 Testing
+
+This project includes comprehensive unit tests for all service layer business logic.
+
+### Running Tests
+
+**Run all tests:**
+```bash
+pytest tests/ -v
+```
+
+**Run specific test file:**
+```bash
+pytest tests/test_products.py -v
+```
+
+**Run specific test:**
+```bash
+pytest tests/test_products.py::TestProductService::test_create_product_success -v
+```
+
+**Run with coverage:**
+```bash
+pytest tests/ --cov=app --cov-report=html
+```
+
+### Test Coverage
+
+The test suite covers:
+
+- ✅ **AuthService** (10 tests)
+  - User signup and login
+  - Password validation
+  - User promotion to admin
+  - Error handling
+
+- ✅ **ProductService** (13 tests)
+  - Product listing and search
+  - Product creation and updates
+  - Duplicate validation
+  - Inventory management
+
+- ✅ **CartService** (11 tests)
+  - Cart creation and retrieval
+  - Adding/removing items
+  - Quantity validation
+  - Product availability checks
+
+- ✅ **CheckoutService** (7 tests)
+  - Order creation from cart
+  - Total calculation
+  - Inventory validation
+  - Cart clearing after order
+
+- ✅ **OrderService** (8 tests)
+  - User order retrieval
+  - Order ownership validation
+  - Admin order access
+  - Pagination
+
+- ✅ **PaymentService** (9 tests)
+  - Payment confirmation
+  - Inventory decrement
+  - Idempotency handling
+  - Partial failure scenarios
+
+**Total: 60 unit tests** covering all critical business logic paths.
+
+### Test Approach
+
+- **Isolation:** Tests use mocking to isolate service logic from database operations
+- **Coverage:** Each service method has tests for success cases and error scenarios
+- **Async Support:** All tests properly handle async/await patterns using pytest-asyncio
+- **Edge Cases:** Tests cover validation errors, not found scenarios, and authorization checks
 
 ## 🚢 Deployment
 
@@ -297,17 +414,36 @@ CREATE_DEFAULT_ADMIN=false
 ## 🛡️ Security
 
 - ✅ Passwords hashed with bcrypt
-- ✅ JWT tokens with expiration
+- ✅ JWT tokens with 15-minute expiration
 - ✅ Role-based access control (RBAC)
 - ✅ Environment variables for sensitive data
 - ✅ Input validation with Pydantic
 - ✅ Protected admin endpoints
+- ✅ CORS configured for secure cross-origin requests
+
+### Security Best Practices
+
+**Token Expiration:**
+- Access tokens expire after 15 minutes
+- Users must re-authenticate after expiration
+- This minimizes the risk window if a token is compromised
+
+**Password Security:**
+- All passwords are hashed using bcrypt
+- Never store plain-text passwords
+- Minimum 6 characters required (configurable)
+
+**Environment Security:**
+- Keep `.env` file out of version control
+- Use strong, random JWT secrets (minimum 32 characters)
+- Change default admin credentials in production
 
 ## 📋 TODO
 
-- [ ] **Unit Tests** - Add comprehensive test coverage
 - [ ] **Rate Limiting** - Implement API rate limiting to prevent abuse
-- [ ] **CORS** - Configure CORS for production frontend integration
+- [ ] **Integration Tests** - Add end-to-end API integration tests
+- [x] **Unit Tests** - ✅ Comprehensive unit tests for all service layer business logic
+- [x] **CORS** - ✅ Configured for production frontend integration
 
 ## 📄 License
 
