@@ -108,6 +108,12 @@ def mock_product_factory():
         product = SimpleNamespace(**defaults)
         product.insert = AsyncMock(return_value=product)
         product.save = AsyncMock(return_value=product)
+        
+        # Add model_dump() method to support serialization (for cache)
+        def model_dump():
+            return {k: v for k, v in defaults.items()}
+        product.model_dump = model_dump
+        
         return product
     return _create
 

@@ -10,6 +10,11 @@ class Settings(BaseModel):
     stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     app_env: str = os.getenv("APP_ENV", "dev")
 
+    # Redis configuration
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis_enabled: bool = os.getenv("REDIS_ENABLED", "true").lower() in ("true", "1", "yes")
+    cache_ttl_seconds: int = int(os.getenv("CACHE_TTL_SECONDS", "300"))  # 5 minutes default
+
     # Admin user configuration
     create_default_admin: bool = os.getenv("CREATE_DEFAULT_ADMIN", "true").lower() in ("true", "1", "yes")
     default_admin_email: str = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@example.com")

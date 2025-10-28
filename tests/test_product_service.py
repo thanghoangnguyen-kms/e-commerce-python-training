@@ -30,6 +30,9 @@ class TestProductService:
 
             # Assert
             assert len(result) == 2
+            assert isinstance(result, list)
+            assert isinstance(result[0], dict)  # Now returns dictionaries
+            assert result[0]["name"] == "Product 1"
 
     @pytest.mark.asyncio
     async def test_list_products_with_search(self, mock_product_factory):
@@ -42,6 +45,7 @@ class TestProductService:
 
             # Act
             result = await ProductService.list_products(search_query="electronics")
+            assert isinstance(result[0], dict)  # Now returns dictionaries
 
             # Assert
             assert len(result) == 1
@@ -61,7 +65,8 @@ class TestProductService:
             result = await ProductService.get_product_by_slug("test-product")
 
             # Assert
-            assert result == product
+            assert isinstance(result, dict)  # Now returns dictionary
+            assert result["slug"] == "test-product"
 
     @pytest.mark.asyncio
     async def test_get_product_by_slug_not_found(self):

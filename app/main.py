@@ -3,8 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 import logging
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
+from app.core.cache import cache_manager
 from app.db.init import db_manager
 from app.api.routers.auth_router import router as auth_router
 from app.api.routers.product_router import router as product_router
@@ -14,6 +16,7 @@ from app.api.routers.admin_router import router as admin_router
 from app.api.routers.payment_router import router as payment_router
 from app.api.routers.order_router import router as order_router
 from app.api.middleware import LoggingMiddleware
+from app.api.rate_limit import limiter, rate_limit_exceeded_handler
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up E-Commerce API...")
     try:
+        await cache_manager.initialize()
         await db_manager.initialize(settings.mongodb_uri)
         logger.info("Application startup complete")
     except Exception as e:
@@ -35,6 +39,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    await cache_manager.close()
     logger.info("Shutting down E-Commerce API...")
     await db_manager.close()
     logger.info("Application shutdown complete")
@@ -55,6 +60,7 @@ product management, shopping cart, and order processing.
 * **Shopping Cart**: Add/remove items, manage cart
 * **Checkout & Orders**: Create orders from cart items
 * **Payment Processing**: Mock payment confirmation (ready for real gateway integration)
+* **Rate Limiting**: Protection against abuse with per-endpoint rate limits
 
 ### Authentication:
 1. First, use `/auth/signup` or `/auth/login` to get your access token
@@ -75,6 +81,10 @@ product management, shopping cart, and order processing.
         "persistAuthorization": True,
     }
 )
+
+# Add rate limiter state to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # Custom OpenAPI schema to add security definitions
 def custom_openapi():
