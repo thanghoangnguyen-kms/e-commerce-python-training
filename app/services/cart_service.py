@@ -1,5 +1,7 @@
-from app.db.models.cart import Cart, CartItem
-from app.db.models.product import Product
+from app.db.models.cart import Cart
+from app.repositories.cart_repository import CartRepository
+from app.repositories.product_repository import ProductRepository
+from app.core.service_decorator import service_method
 from fastapi import HTTPException
 
 
@@ -9,64 +11,59 @@ class CartService:
     Handles all business logic related to shopping cart management.
     """
 
-    @staticmethod
-    async def get_or_create_cart(user_id: str) -> Cart:
-        """Get user's cart or create a new one if it doesn't exist."""
-        cart = await Cart.find_one(Cart.user_id == user_id)
-        if not cart:
-            cart = Cart(user_id=user_id, items=[])
-            await cart.insert()
-        return cart
+    def __init__(
+        self, 
+        cart_repository: CartRepository = None, 
+        product_repository: ProductRepository = None
+    ):
+        """Initialize CartService with repository dependencies."""
+        self.cart_repository = cart_repository or CartRepository()
+        self.product_repository = product_repository or ProductRepository()
 
-    @staticmethod
-    async def add_item_to_cart(user_id: str, product_id: str, qty: int) -> Cart:
+    @service_method
+    async def get_or_create_cart(self, user_id: str) -> Cart:
+        """Get user's cart or create a new one if it doesn't exist."""
+        return await self.cart_repository.get_or_create_cart(user_id)
+
+    @service_method
+    async def add_item_to_cart(self, user_id: str, product_id: int, qty: int) -> Cart:
         """
         Add an item to the user's cart.
         If item already exists, increment quantity.
+        Stores integer product_id in cart for easy reference.
         """
-        # Validate product exists and is active
-        product = await Product.get(product_id)
+        # Validate product exists and is active using product_id (integer)
+        product = await self.product_repository.find_by_product_id(product_id)
         if not product or not product.is_active:
             raise HTTPException(404, "Product not available")
 
         if qty <= 0:
             raise HTTPException(400, "Quantity must be greater than 0")
 
-        # Get or create cart
-        cart = await CartService.get_or_create_cart(user_id)
-
-        # Check if item already in cart
-        item_found = False
-        for item in cart.items:
-            if item.product_id == product_id:
-                item.qty += qty
-                item_found = True
-                break
-
-        # If not found, add new item
-        if not item_found:
-            cart.items.append(CartItem(product_id=product_id, qty=qty))
-
-        await cart.save()
+        # Add item to cart using the integer product_id (not MongoDB ObjectId)
+        cart = await self.cart_repository.add_item(user_id, product_id, qty)
         return cart
 
-    @staticmethod
-    async def remove_item_from_cart(user_id: str, product_id: str) -> Cart:
-        """Remove an item completely from the user's cart."""
-        cart = await Cart.find_one(Cart.user_id == user_id)
+    @service_method
+    async def remove_item_from_cart(self, user_id: str, product_id: int) -> Cart:
+        """
+        Remove an item completely from the user's cart.
+        Uses integer product_id for lookup and removal.
+        """
+        # Validate product exists
+        product = await self.product_repository.find_by_product_id(product_id)
+        if not product:
+            raise HTTPException(404, "Product not found")
+        
+        cart = await self.cart_repository.remove_item(user_id, product_id)
         if not cart:
             raise HTTPException(404, "Cart not found")
-
-        cart.items = [item for item in cart.items if item.product_id != product_id]
-        await cart.save()
         return cart
 
-    @staticmethod
-    async def clear_cart(user_id: str) -> Cart:
+    @service_method
+    async def clear_cart(self, user_id: str) -> Cart:
         """Clear all items from the user's cart."""
-        cart = await Cart.find_one(Cart.user_id == user_id)
-        if cart:
-            cart.items = []
-            await cart.save()
+        cart = await self.cart_repository.clear_cart(user_id)
+        if not cart:
+            raise HTTPException(404, "Cart not found")
         return cart
-

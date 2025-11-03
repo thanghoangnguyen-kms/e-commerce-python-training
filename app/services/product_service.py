@@ -1,10 +1,9 @@
 """Product service for business logic only."""
-import logging
 from app.db.models.product import Product
+from app.repositories.product_repository import ProductRepository
 from app.core.cache_decorator import cached, invalidate_cache
+from app.core.service_decorator import service_method
 from fastapi import HTTPException
-
-logger = logging.getLogger(__name__)
 
 
 class ProductService:
@@ -14,80 +13,53 @@ class ProductService:
     is handled by the @cached decorator in cache_decorator.py
     """
 
-    @staticmethod
+    def __init__(self, product_repository: ProductRepository = None):
+        """Initialize ProductService with repository dependency."""
+        self.product_repository = product_repository or ProductRepository()
+
+    @service_method
     @cached(
         namespace="products",
-        key_builder=lambda search_query=None, skip=0, limit=20: f"list:q={search_query or 'all'}:skip={skip}:limit={limit}"
+        key_builder=lambda self, search_query=None, skip=0, limit=20: f"list:q={search_query or 'all'}:skip={skip}:limit={limit}"
     )
-    async def list_products(search_query: str | None = None, skip: int = 0, limit: int = 20) -> list[dict]:
+    async def list_products(self, search_query: str | None = None, skip: int = 0, limit: int = 20) -> list[Product]:
         """
         Get list of products with optional search and pagination.
-
-        Args:
-            search_query: Optional search term for name or category
-            skip: Number of items to skip
-            limit: Maximum number of items to return
-
-        Returns:
-            List of products matching criteria (as dictionaries for JSON serialization)
+        Returns products as Product model objects with MongoDB id field included.
         """
-        query = {}
-        if search_query:
-            query = {
-                "$or": [
-                    {"name": {"$regex": search_query, "$options": "i"}},
-                    {"category": {"$regex": search_query, "$options": "i"}}
-                ]
-            }
+        products = await self.product_repository.search_products(search_query, skip, limit)
+        return products if products else []
 
-        products = await Product.find(query).skip(skip).limit(limit).to_list()
-        return [product.model_dump() for product in products] if products else []
-
-    @staticmethod
+    @service_method
     @cached(
         namespace="products",
-        key_builder=lambda slug: f"slug:{slug}"
+        key_builder=lambda self, slug: f"slug:{slug}"
     )
-    async def get_product_by_slug(slug: str) -> dict:
+    async def get_product_by_slug(self, slug: str) -> Product:
         """
         Get a single product by its slug.
-
-        Args:
-            slug: Product slug identifier
-
-        Returns:
-            Product if found and active (as dictionary for JSON serialization)
-
-        Raises:
-            HTTPException: If product not found or inactive
+        Returns product as Product model object with MongoDB id field included.
         """
-        product = await Product.find_one(Product.slug == slug, Product.is_active == True)
+        product = await self.product_repository.find_by_slug(slug, active_only=True)
         if not product:
             raise HTTPException(404, "Product not found")
 
-        return product.model_dump()
+        return product
 
-    @staticmethod
-    async def get_product_by_id(product_id: str) -> Product:
+    @service_method
+    async def get_product_by_id(self, product_id: str) -> Product:
         """
-        Get a product by its MongoDB ID.
-
-        Args:
-            product_id: MongoDB document ID
-
-        Returns:
-            Product if found
-
-        Raises:
-            HTTPException: If product not found
+        Get a product by its MongoDB ObjectId.
+        Returns product as Product model object.
         """
-        product = await Product.get(product_id)
+        product = await self.product_repository.get_by_id(product_id)
         if not product:
             raise HTTPException(404, "Product not found")
         return product
 
-    @staticmethod
+    @service_method
     async def create_product(
+        self,
         product_id: int,
         name: str,
         slug: str,
@@ -98,15 +70,10 @@ class ProductService:
         category: str | None,
         is_active: bool
     ) -> Product:
-        """
-        Create a new product.
-
-        Raises:
-            HTTPException: If slug or product_id already exists
-        """
-        if await Product.find_one(Product.slug == slug):
+        """Create a new product. Returns Product model object with MongoDB id."""
+        if await self.product_repository.find_by_slug(slug, active_only=False):
             raise HTTPException(400, "Slug already exists")
-        if await Product.find_one(Product.product_id == product_id):
+        if await self.product_repository.find_by_product_id(product_id):
             raise HTTPException(400, "Product ID already exists")
 
         product = Product(
@@ -120,15 +87,16 @@ class ProductService:
             category=category,
             is_active=is_active,
         )
-        await product.insert()
+        await self.product_repository.create(product)
 
         # Invalidate all product list caches (since a new product was added)
         await invalidate_cache("products", "list:*")
 
         return product
 
-    @staticmethod
+    @service_method
     async def update_product(
+        self,
         product_id: str,
         new_product_id: int,
         name: str,
@@ -141,21 +109,16 @@ class ProductService:
         is_active: bool
     ) -> Product:
         """
-        Update an existing product.
-
-        Args:
-            product_id: MongoDB document ID of product to update
-
-        Raises:
-            HTTPException: If product not found or new product_id already exists
+        Update an existing product by MongoDB ObjectId.
+        Returns updated Product model object with MongoDB id.
         """
-        product = await Product.get(product_id)
+        product = await self.product_repository.get_by_id(product_id)
         if not product:
             raise HTTPException(404, "Product not found")
 
         # Check if product_id is being changed and if new ID already exists
         if product.product_id != new_product_id:
-            existing = await Product.find_one(Product.product_id == new_product_id)
+            existing = await self.product_repository.find_by_product_id(new_product_id)
             if existing:
                 raise HTTPException(400, "Product ID already exists")
 
@@ -170,7 +133,7 @@ class ProductService:
         product.inventory = inventory
         product.category = category
         product.is_active = is_active
-        await product.save()
+        await self.product_repository.update(product)
 
         # Invalidate caches: specific product cache and all list caches
         await invalidate_cache("products", f"slug:{old_slug}")
@@ -180,3 +143,29 @@ class ProductService:
 
         return product
 
+    @service_method
+    async def delete_product(self, product_id: str) -> dict:
+        """
+        Delete a product by its MongoDB ObjectId.
+        Returns confirmation with deleted product details.
+        """
+        product = await self.product_repository.get_by_id(product_id)
+        if not product:
+            raise HTTPException(404, "Product not found")
+
+        # Store slug for cache invalidation
+        product_slug = product.slug
+
+        # Delete the product
+        await self.product_repository.delete(product)
+
+        # Invalidate caches: specific product cache and all list caches
+        await invalidate_cache("products", f"slug:{product_slug}")
+        await invalidate_cache("products", "list:*")
+
+        return {
+            "message": "Product deleted successfully",
+            "product_id": product_id,
+            "slug": product_slug,
+            "name": product.name
+        }

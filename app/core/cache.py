@@ -11,8 +11,9 @@ This module provides a centralized caching layer with best practices:
 """
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 from redis import asyncio as aioredis
+from beanie import Document
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class CacheManager:
     """
 
     def __init__(self):
-        self.redis: Optional[aioredis.Redis] = None
+        self.redis: aioredis.Redis | None = None
         self.enabled = settings.redis_enabled
 
     async def initialize(self):
@@ -69,7 +70,29 @@ class CacheManager:
         """
         return f"ecommerce:{namespace}:{key}"
 
-    async def get(self, namespace: str, key: str) -> Optional[Any]:
+    def _serialize_value(self, value: Any) -> Any:
+        """
+        Serialize value for caching, handling Beanie Documents properly.
+        
+        Args:
+            value: Value to serialize
+            
+        Returns:
+            Serializable value (dict, list, or primitive)
+        """
+        if isinstance(value, Document):
+            # Convert Beanie Document to dict using model_dump
+            return value.model_dump(mode='json')
+        elif isinstance(value, list):
+            # Handle list of Documents
+            return [self._serialize_value(item) for item in value]
+        elif isinstance(value, dict):
+            # Handle dict with Document values
+            return {k: self._serialize_value(v) for k, v in value.items()}
+        else:
+            return value
+
+    async def get(self, namespace: str, key: str) -> Any | None:
         """
         Get value from cache.
 
@@ -102,7 +125,7 @@ class CacheManager:
         namespace: str,
         key: str,
         value: Any,
-        ttl: Optional[int] = None
+        ttl: int | None = None
     ) -> bool:
         """
         Set value in cache with optional TTL.
@@ -111,7 +134,7 @@ class CacheManager:
             namespace: Category of data
             key: Cache key
             value: Value to cache (will be JSON serialized)
-            ttl: Time to live in seconds (default from settings)
+            ttl: Time to live in seconds (uses default if None)
 
         Returns:
             True if successful, False otherwise
@@ -121,7 +144,10 @@ class CacheManager:
 
         try:
             cache_key = self._make_key(namespace, key)
-            serialized = json.dumps(value, default=str)  # default=str handles datetime, ObjectId, etc.
+            
+            # Properly serialize Beanie Documents and other objects
+            serializable_value = self._serialize_value(value)
+            serialized = json.dumps(serializable_value, default=str)
 
             ttl = ttl or settings.cache_ttl_seconds
             await self.redis.setex(cache_key, ttl, serialized)
@@ -134,14 +160,14 @@ class CacheManager:
 
     async def delete(self, namespace: str, key: str) -> bool:
         """
-        Delete a specific key from cache.
+        Delete a specific cache entry.
 
         Args:
             namespace: Category of data
             key: Cache key
 
         Returns:
-            True if successful, False otherwise
+            True if deleted, False otherwise
         """
         if not self.enabled or not self.redis:
             return False
@@ -155,14 +181,13 @@ class CacheManager:
             logger.error(f"Cache delete error for {namespace}:{key}: {e}")
             return False
 
-    async def delete_pattern(self, namespace: str, pattern: str = "*") -> int:
+    async def delete_pattern(self, namespace: str, pattern: str) -> int:
         """
-        Delete all keys matching a pattern within a namespace.
-        Useful for cache invalidation.
+        Delete all cache keys matching a pattern.
 
         Args:
             namespace: Category of data
-            pattern: Pattern to match (default: all keys in namespace)
+            pattern: Pattern to match (supports * wildcard)
 
         Returns:
             Number of keys deleted
@@ -188,74 +213,32 @@ class CacheManager:
             logger.error(f"Cache delete pattern error for {namespace}:{pattern}: {e}")
             return 0
 
-    async def get_many(self, namespace: str, keys: list[str]) -> dict[str, Any]:
+    async def clear_namespace(self, namespace: str) -> int:
         """
-        Get multiple values from cache in one operation.
-        More efficient than multiple get() calls.
+        Clear all cache entries in a namespace.
 
         Args:
-            namespace: Category of data
-            keys: List of cache keys
+            namespace: Category to clear
 
         Returns:
-            Dictionary mapping keys to their values (None if not found)
+            Number of keys deleted
         """
-        if not self.enabled or not self.redis or not keys:
-            return {key: None for key in keys}
-
-        try:
-            cache_keys = [self._make_key(namespace, key) for key in keys]
-            values = await self.redis.mget(cache_keys)
-
-            result = {}
-            for key, value in zip(keys, values):
-                if value:
-                    result[key] = json.loads(value)
-                else:
-                    result[key] = None
-
-            return result
-        except Exception as e:
-            logger.error(f"Cache get_many error for {namespace}: {e}")
-            return {key: None for key in keys}
-
-    async def set_many(
-        self,
-        namespace: str,
-        items: dict[str, Any],
-        ttl: Optional[int] = None
-    ) -> bool:
-        """
-        Set multiple values in cache.
-
-        Args:
-            namespace: Category of data
-            items: Dictionary mapping keys to values
-            ttl: Time to live in seconds
-
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self.enabled or not self.redis or not items:
-            return False
-
-        try:
-            pipeline = self.redis.pipeline()
-            ttl = ttl or settings.cache_ttl_seconds
-
-            for key, value in items.items():
-                cache_key = self._make_key(namespace, key)
-                serialized = json.dumps(value, default=str)
-                await pipeline.setex(cache_key, ttl, serialized)
-
-            await pipeline.execute()
-            logger.debug(f"Cache SET_MANY: {len(items)} items in {namespace}")
-            return True
-        except Exception as e:
-            logger.error(f"Cache set_many error for {namespace}: {e}")
-            return False
+        return await self.delete_pattern(namespace, "*")
 
 
-# Global cache manager instance
+# Singleton instance
 cache_manager = CacheManager()
 
+
+async def invalidate_cache(namespace: str, pattern: str = "*") -> int:
+    """
+    Invalidate cache entries matching a pattern.
+
+    Args:
+        namespace: Cache namespace
+        pattern: Pattern to match (supports * wildcard)
+
+    Returns:
+        Number of keys deleted
+    """
+    return await cache_manager.delete_pattern(namespace, pattern)

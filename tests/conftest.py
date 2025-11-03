@@ -109,9 +109,13 @@ def mock_product_factory():
         product.insert = AsyncMock(return_value=product)
         product.save = AsyncMock(return_value=product)
         
-        # Add model_dump() method to support serialization (for cache)
-        def model_dump():
-            return {k: v for k, v in defaults.items()}
+        # Add model_dump() method to support serialization with mode and exclude parameters
+        def model_dump(mode=None, exclude=None):
+            result = {k: v for k, v in defaults.items()}
+            # Handle exclude parameter to filter out specified fields
+            if exclude:
+                result = {k: v for k, v in result.items() if k not in exclude}
+            return result
         product.model_dump = model_dump
         
         return product
@@ -167,6 +171,16 @@ def mock_order_factory():
         order = SimpleNamespace(**defaults)
         order.insert = AsyncMock(return_value=order)
         order.save = AsyncMock(return_value=order)
+        
+        # Add model_dump() method to support serialization with mode and exclude parameters
+        def model_dump(mode=None, exclude=None):
+            result = {k: v for k, v in defaults.items()}
+            # Handle exclude parameter to filter out specified fields
+            if exclude:
+                result = {k: v for k, v in result.items() if k not in exclude}
+            return result
+        order.model_dump = model_dump
+        
         return order
     return _create
 
@@ -181,7 +195,7 @@ def mock_cart_item_factory():
         from app.db.models.cart import CartItem
 
         defaults = {
-            "product_id": "507f1f77bcf86cd799439012",
+            "product_id": 1,  # Changed from string to integer
             "qty": 1,
         }
         defaults.update(overrides)
@@ -208,4 +222,3 @@ def mock_order_item_factory():
         defaults.update(overrides)
         return OrderItem(**defaults)
     return _create
-

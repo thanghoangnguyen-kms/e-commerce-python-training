@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Query, Depends, HTTPException
+from app.api.service_deps import get_payment_service, get_order_service
 from app.services.payment_service import MockPaymentService
+from app.services.order_service import OrderService
 from app.api.deps import get_current_user
-from app.db.models.order import Order
 from app.schemas.payment import PaymentConfirmResponse
 
 router = APIRouter()
@@ -10,7 +11,9 @@ router = APIRouter()
 async def confirm_payment(
     order_id: str = Query(..., example="67123abc456def789012345", description="Order ID to confirm payment for"),
     outcome: str = Query("success", example="success", description="Payment outcome: success, failure, or canceled"),
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
+    payment_service: MockPaymentService = Depends(get_payment_service),
+    order_service: OrderService = Depends(get_order_service)
 ):
     """
     Confirm payment for an order (Mock endpoint).
@@ -23,13 +26,10 @@ async def confirm_payment(
     - `canceled`: Payment canceled by user
     """
     # Verify order ownership - SECURITY FIX
-    order = await Order.get(order_id)
+    order = await order_service.get_order_by_id(order_id, user["sub"])
     if not order:
         raise HTTPException(404, "Order not found")
 
-    if order.user_id != user["sub"]:
-        raise HTTPException(403, "Not your order")
-
     # Process payment
-    order = await MockPaymentService.confirm(order_id, outcome)  # type: ignore
+    order = await payment_service.confirm(order_id, outcome)  # type: ignore
     return PaymentConfirmResponse(order_id=str(order.id), status=order.status)

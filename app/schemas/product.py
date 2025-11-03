@@ -37,3 +37,4 @@ class ProductUpdateRequest(ProductCreateRequest):
     """Request schema for updating a product."""
     pass
 
+

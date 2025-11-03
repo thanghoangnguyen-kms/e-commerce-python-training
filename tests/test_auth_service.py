@@ -7,10 +7,11 @@ Unit tests for AuthService.
 - Promote to admin
 """
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import Mock, AsyncMock, patch
 from fastapi import HTTPException
 
 from app.services.auth_service import AuthService
+from app.repositories.user_repository import UserRepository
 
 
 class TestAuthServiceSignup:
@@ -21,36 +22,43 @@ class TestAuthServiceSignup:
         """Should create user and return token"""
         # Arrange
         new_user = mock_user_factory(email="new@example.com")
-
-        with patch("app.services.auth_service.User") as MockUser, \
-             patch("app.services.auth_service.hash_password") as mock_hash, \
-             patch("app.services.auth_service.create_token") as mock_token:
-
-            MockUser.find_one = AsyncMock(return_value=None)
-            MockUser.return_value = new_user
-            mock_hash.return_value = "hashed"
-            mock_token.return_value = "token_123"
-
+        
+        # Mock repository
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.find_by_email = AsyncMock(return_value=None)
+        mock_repo.create = AsyncMock(return_value=new_user)
+        
+        # Instantiate service with mocked repository
+        service = AuthService(user_repository=mock_repo)
+        
+        # Mock User model constructor
+        with patch("app.services.auth_service.User", return_value=new_user):
             # Act
-            result = await AuthService.signup_user("new@example.com", "pass123")
+            result = await service.signup_user("new@example.com", "pass123")
 
-            # Assert
-            assert result["access_token"] == "token_123"
-            assert result["token_type"] == "bearer"
-            new_user.insert.assert_awaited_once()
+        # Assert
+        assert result["access_token"] is not None
+        assert result["token_type"] == "bearer"
+        mock_repo.find_by_email.assert_called_once_with("new@example.com")
+        mock_repo.create.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_signup_fails_duplicate_email(self, mock_user_factory):
         """Should raise 400 when email already exists"""
         # Arrange
-        with patch("app.services.auth_service.User") as MockUser:
-            MockUser.find_one = AsyncMock(return_value=mock_user_factory())
+        existing_user = mock_user_factory()
+        
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.find_by_email = AsyncMock(return_value=existing_user)
+        
+        service = AuthService(user_repository=mock_repo)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await AuthService.signup_user("existing@example.com", "pass")
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.signup_user("existing@example.com", "pass")
 
-            assert exc.value.status_code == 400
+        assert exc.value.status_code == 400
+        assert "already registered" in str(exc.value.detail)
 
 
 class TestAuthServiceLogin:
@@ -59,34 +67,38 @@ class TestAuthServiceLogin:
     @pytest.mark.asyncio
     async def test_login_success(self, mock_user_factory):
         """Should return token with valid credentials"""
-        # Arrange
-        user = mock_user_factory(email="user@test.com", hashed_password="hashed")
+        # Arrange - Create user with proper bcrypt hash
+        import bcrypt
+        hashed = bcrypt.hashpw("password".encode(), bcrypt.gensalt()).decode()
+        user = mock_user_factory(email="user@test.com", hashed_password=hashed)
+        
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.find_by_email = AsyncMock(return_value=user)
+        
+        service = AuthService(user_repository=mock_repo)
 
-        with patch("app.services.auth_service.User") as MockUser, \
-             patch("app.services.auth_service.verify_password", return_value=True), \
-             patch("app.services.auth_service.create_token", return_value="token_456"):
+        # Act
+        result = await service.login_user("user@test.com", "password")
 
-            MockUser.find_one = AsyncMock(return_value=user)
-
-            # Act
-            result = await AuthService.login_user("user@test.com", "password")
-
-            # Assert
-            assert result["access_token"] == "token_456"
-            assert result["token_type"] == "bearer"
+        # Assert
+        assert result["access_token"] is not None
+        assert result["token_type"] == "bearer"
+        mock_repo.find_by_email.assert_called_once_with("user@test.com")
 
     @pytest.mark.asyncio
-    async def test_login_fails_invalid_credentials(self, mock_user_factory):
+    async def test_login_fails_invalid_credentials(self):
         """Should raise 401 for wrong email or password"""
         # Arrange - test with no user found
-        with patch("app.services.auth_service.User") as MockUser:
-            MockUser.find_one = AsyncMock(return_value=None)
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.find_by_email = AsyncMock(return_value=None)
+        
+        service = AuthService(user_repository=mock_repo)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await AuthService.login_user("wrong@test.com", "pass")
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.login_user("wrong@test.com", "pass")
 
-            assert exc.value.status_code == 401
+        assert exc.value.status_code == 401
 
 
 class TestAuthServiceGetUserById:
@@ -97,28 +109,33 @@ class TestAuthServiceGetUserById:
         """Should return user when found"""
         # Arrange
         user = mock_user_factory(id="user_123")
+        
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.get_by_id = AsyncMock(return_value=user)
+        
+        service = AuthService(user_repository=mock_repo)
 
-        with patch("app.services.auth_service.User") as MockUser:
-            MockUser.get = AsyncMock(return_value=user)
+        # Act
+        result = await service.get_user_by_id("user_123")
 
-            # Act
-            result = await AuthService.get_user_by_id("user_123")
-
-            # Assert
-            assert result == user
+        # Assert
+        assert result == user
+        mock_repo.get_by_id.assert_called_once_with("user_123")
 
     @pytest.mark.asyncio
     async def test_get_user_by_id_not_found(self):
         """Should raise 404 when user doesn't exist"""
         # Arrange
-        with patch("app.services.auth_service.User") as MockUser:
-            MockUser.get = AsyncMock(return_value=None)
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.get_by_id = AsyncMock(return_value=None)
+        
+        service = AuthService(user_repository=mock_repo)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await AuthService.get_user_by_id("nonexistent")
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.get_user_by_id("nonexistent")
 
-            assert exc.value.status_code == 404
+        assert exc.value.status_code == 404
 
 
 class TestAuthServicePromoteToAdmin:
@@ -129,29 +146,34 @@ class TestAuthServicePromoteToAdmin:
         """Should update role and save"""
         # Arrange
         user = mock_user_factory(role="user")
+        
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.find_by_email = AsyncMock(return_value=user)
+        mock_repo.update = AsyncMock(return_value=user)
+        
+        service = AuthService(user_repository=mock_repo)
 
-        with patch("app.services.auth_service.User") as MockUser:
-            MockUser.find_one = AsyncMock(return_value=user)
+        # Act
+        result = await service.promote_user_to_admin("user@test.com")
 
-            # Act
-            result = await AuthService.promote_user_to_admin("user@test.com")
-
-            # Assert
-            assert result.role == "admin"
-            user.save.assert_awaited_once()
+        # Assert
+        assert result.role == "admin"
+        mock_repo.find_by_email.assert_called_once_with("user@test.com")
+        mock_repo.update.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_promote_to_admin_already_admin(self, mock_user_factory):
         """Should raise 400 if already admin"""
         # Arrange
         user = mock_user_factory(role="admin")
+        
+        mock_repo = Mock(spec=UserRepository)
+        mock_repo.find_by_email = AsyncMock(return_value=user)
+        
+        service = AuthService(user_repository=mock_repo)
 
-        with patch("app.services.auth_service.User") as MockUser:
-            MockUser.find_one = AsyncMock(return_value=user)
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.promote_user_to_admin("admin@test.com")
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await AuthService.promote_user_to_admin("admin@test.com")
-
-            assert exc.value.status_code == 400
-
+        assert exc.value.status_code == 400

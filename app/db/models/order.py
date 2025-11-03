@@ -19,3 +19,4 @@ class Order(Document):
 
     class Settings:
         name = "orders"
+

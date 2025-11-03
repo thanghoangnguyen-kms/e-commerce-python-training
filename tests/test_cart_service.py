@@ -7,10 +7,12 @@ Unit tests for CartService.
 - Clear cart
 """
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import Mock, AsyncMock
 from fastapi import HTTPException
 
 from app.services.cart_service import CartService
+from app.repositories.cart_repository import CartRepository
+from app.repositories.product_repository import ProductRepository
 
 
 class TestCartService:
@@ -21,138 +23,153 @@ class TestCartService:
         """Should return existing cart"""
         # Arrange
         cart = mock_cart_factory(user_id="user_123")
+        
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.get_or_create_cart = AsyncMock(return_value=cart)
+        
+        service = CartService(cart_repository=mock_cart_repo)
 
-        with patch("app.services.cart_service.Cart") as MockCart:
-            MockCart.find_one = AsyncMock(return_value=cart)
+        # Act
+        result = await service.get_or_create_cart("user_123")
 
-            # Act
-            result = await CartService.get_or_create_cart("user_123")
-
-            # Assert
-            assert result == cart
-            cart.insert.assert_not_awaited()
+        # Assert
+        assert result == cart
+        mock_cart_repo.get_or_create_cart.assert_called_once_with("user_123")
 
     @pytest.mark.asyncio
     async def test_get_or_create_cart_creates_new(self, mock_cart_factory):
         """Should create new cart when none exists"""
         # Arrange
         new_cart = mock_cart_factory(items=[])
+        
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.get_or_create_cart = AsyncMock(return_value=new_cart)
+        
+        service = CartService(cart_repository=mock_cart_repo)
 
-        with patch("app.services.cart_service.Cart") as MockCart:
-            MockCart.find_one = AsyncMock(return_value=None)
-            MockCart.return_value = new_cart
+        # Act
+        result = await service.get_or_create_cart("user_123")
 
-            # Act
-            result = await CartService.get_or_create_cart("user_123")
-
-            # Assert
-            assert result == new_cart
-            new_cart.insert.assert_awaited_once()
+        # Assert
+        assert result == new_cart
 
     @pytest.mark.asyncio
     async def test_add_item_to_cart_success(self, mock_cart_factory, mock_product_factory):
         """Should add new item to cart"""
         # Arrange
-        product = mock_product_factory(id="prod_1", is_active=True)
+        product = mock_product_factory(id="prod_mongo_id", product_id=1, is_active=True)
         cart = mock_cart_factory(items=[])
+        
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=product)
+        
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.add_item = AsyncMock(return_value=cart)
+        
+        service = CartService(cart_repository=mock_cart_repo, product_repository=mock_product_repo)
 
-        with patch("app.services.cart_service.Product") as MockProduct, \
-             patch("app.services.cart_service.CartService.get_or_create_cart", AsyncMock(return_value=cart)):
+        # Act
+        result = await service.add_item_to_cart("user_1", 1, 2)
 
-            MockProduct.get = AsyncMock(return_value=product)
-
-            # Act
-            result = await CartService.add_item_to_cart("user_1", "prod_1", 2)
-
-            # Assert
-            assert len(result.items) == 1
-            assert result.items[0].product_id == "prod_1"
-            assert result.items[0].qty == 2
-            cart.save.assert_awaited_once()
+        # Assert
+        assert result == cart
+        mock_product_repo.find_by_product_id.assert_called_once_with(1)
+        mock_cart_repo.add_item.assert_called_once_with("user_1", 1, 2)  # Changed to use integer product_id
 
     @pytest.mark.asyncio
     async def test_add_item_increments_existing_quantity(
         self, mock_cart_factory, mock_product_factory, mock_cart_item_factory
     ):
-        """Should increment quantity for existing item"""
+        """Should increment quantity for existing cart item"""
         # Arrange
-        existing_item = mock_cart_item_factory(product_id="prod_1", qty=1)
+        product = mock_product_factory(id="prod_mongo_id", product_id=1, is_active=True)
+        existing_item = mock_cart_item_factory(product_id=1, qty=1)  # Changed to integer product_id
         cart = mock_cart_factory(items=[existing_item])
-        product = mock_product_factory(id="prod_1", is_active=True)
+        
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=product)
+        
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.add_item = AsyncMock(return_value=cart)
+        
+        service = CartService(cart_repository=mock_cart_repo, product_repository=mock_product_repo)
 
-        with patch("app.services.cart_service.Product") as MockProduct, \
-             patch("app.services.cart_service.CartService.get_or_create_cart", AsyncMock(return_value=cart)):
+        # Act
+        result = await service.add_item_to_cart("user_1", 1, 2)
 
-            MockProduct.get = AsyncMock(return_value=product)
-
-            # Act
-            result = await CartService.add_item_to_cart("user_1", "prod_1", 2)
-
-            # Assert
-            assert len(result.items) == 1
-            assert result.items[0].qty == 3  # 1 + 2
+        # Assert
+        assert result == cart
+        mock_product_repo.find_by_product_id.assert_called_once_with(1)
 
     @pytest.mark.asyncio
     async def test_add_item_fails_invalid_quantity(self, mock_product_factory):
         """Should raise 400 for invalid quantity"""
         # Arrange
-        product = mock_product_factory(is_active=True)
+        product = mock_product_factory(id="prod_mongo_id", product_id=1, is_active=True)
+        
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=product)
+        
+        service = CartService(product_repository=mock_product_repo)
 
-        with patch("app.services.cart_service.Product") as MockProduct:
-            MockProduct.get = AsyncMock(return_value=product)
-
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await CartService.add_item_to_cart("user_1", "prod_1", 0)
-
-            assert exc.value.status_code == 400
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.add_item_to_cart("user_1", 1, 0)
+        
+        assert exc.value.status_code == 400
 
     @pytest.mark.asyncio
     async def test_add_item_fails_product_not_available(self):
-        """Should raise 404 when product not found or inactive"""
+        """Should raise 404 when product doesn't exist or is inactive"""
         # Arrange
-        with patch("app.services.cart_service.Product") as MockProduct:
-            MockProduct.get = AsyncMock(return_value=None)
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=None)
+        
+        service = CartService(product_repository=mock_product_repo)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await CartService.add_item_to_cart("user_1", "prod_1", 1)
-
-            assert exc.value.status_code == 404
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.add_item_to_cart("user_1", 999, 1)
+        
+        assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_remove_item_from_cart(self, mock_cart_factory, mock_cart_item_factory):
-        """Should remove specified item"""
+    async def test_remove_item_from_cart(self, mock_cart_factory, mock_product_factory):
+        """Should remove item from cart"""
         # Arrange
-        item1 = mock_cart_item_factory(product_id="prod_1")
-        item2 = mock_cart_item_factory(product_id="prod_2")
-        cart = mock_cart_factory(items=[item1, item2])
+        product = mock_product_factory(id="prod_mongo_id", product_id=1)
+        cart = mock_cart_factory(items=[])
 
-        with patch("app.services.cart_service.Cart") as MockCart:
-            MockCart.find_one = AsyncMock(return_value=cart)
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=product)
 
-            # Act
-            result = await CartService.remove_item_from_cart("user_1", "prod_1")
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.remove_item = AsyncMock(return_value=cart)
 
-            # Assert
-            assert len(result.items) == 1
-            assert result.items[0].product_id == "prod_2"
+        service = CartService(cart_repository=mock_cart_repo, product_repository=mock_product_repo)
+
+        # Act
+        result = await service.remove_item_from_cart("user_1", 1)
+
+        # Assert
+        assert result == cart
+        mock_product_repo.find_by_product_id.assert_called_once_with(1)
+        mock_cart_repo.remove_item.assert_called_once_with("user_1", 1)  # Changed to integer
 
     @pytest.mark.asyncio
-    async def test_clear_cart(self, mock_cart_factory, mock_cart_item_factory):
+    async def test_clear_cart(self, mock_cart_factory):
         """Should clear all items"""
         # Arrange
-        items = [mock_cart_item_factory(), mock_cart_item_factory()]
-        cart = mock_cart_factory(items=items)
+        cart = mock_cart_factory(items=[])
+        
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.clear_cart = AsyncMock(return_value=cart)
+        
+        service = CartService(cart_repository=mock_cart_repo)
 
-        with patch("app.services.cart_service.Cart") as MockCart:
-            MockCart.find_one = AsyncMock(return_value=cart)
+        # Act
+        result = await service.clear_cart("user_1")
 
-            # Act
-            result = await CartService.clear_cart("user_1")
-
-            # Assert
-            assert result.items == []
-            cart.save.assert_awaited_once()
-
-
+        # Assert
+        assert result.items == []
+        mock_cart_repo.clear_cart.assert_called_once_with("user_1")

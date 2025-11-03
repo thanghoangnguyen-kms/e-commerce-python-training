@@ -6,11 +6,11 @@ Unit tests for OrderService.
 - Get all orders (admin)
 """
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock
 from fastapi import HTTPException
 
 from app.services.order_service import OrderService
-from tests.conftest import QueryChain
+from app.repositories.order_repository import OrderRepository
 
 
 class TestOrderService:
@@ -18,77 +18,93 @@ class TestOrderService:
 
     @pytest.mark.asyncio
     async def test_get_user_orders(self, mock_order_factory):
-        """Should return user's orders"""
+        """Should return user's orders as Order model objects"""
         # Arrange
         orders = [mock_order_factory(user_id="user_1"), mock_order_factory(user_id="user_1")]
 
-        with patch("app.services.order_service.Order") as MockOrder:
-            MockOrder.find = MagicMock(return_value=QueryChain(orders))
+        mock_repo = Mock(spec=OrderRepository)
+        mock_repo.find_by_user_id = AsyncMock(return_value=orders)
 
-            # Act
-            result = await OrderService.get_user_orders("user_1")
+        service = OrderService(order_repository=mock_repo)
 
-            # Assert
-            assert len(result) == 2
+        # Act
+        result = await service.get_user_orders("user_1")
+
+        # Assert
+        assert len(result) == 2
+        assert result[0].user_id == "user_1"
+        assert hasattr(result[0], 'id')  # MongoDB id field is included
+        mock_repo.find_by_user_id.assert_called_once_with("user_1", 0, 20)
 
     @pytest.mark.asyncio
     async def test_get_order_by_id_success(self, mock_order_factory):
-        """Should return order when it belongs to user"""
+        """Should return order as Order model object when it belongs to user"""
         # Arrange
         order = mock_order_factory(id="order_1", user_id="user_1")
 
-        with patch("app.services.order_service.Order") as MockOrder:
-            MockOrder.get = AsyncMock(return_value=order)
+        mock_repo = Mock(spec=OrderRepository)
+        mock_repo.find_by_id_and_user = AsyncMock(return_value=order)
 
-            # Act
-            result = await OrderService.get_order_by_id("order_1", "user_1")
+        service = OrderService(order_repository=mock_repo)
 
-            # Assert
-            assert result == order
+        # Act
+        result = await service.get_order_by_id("order_1", "user_1")
+
+        # Assert
+        assert result.id == "order_1"
+        assert result.user_id == "user_1"
+        assert hasattr(result, 'id')  # MongoDB id field is included
+        mock_repo.find_by_id_and_user.assert_called_once_with("order_1", "user_1")
 
     @pytest.mark.asyncio
     async def test_get_order_by_id_not_found(self):
         """Should raise 404 when order doesn't exist"""
         # Arrange
-        with patch("app.services.order_service.Order") as MockOrder:
-            MockOrder.get = AsyncMock(return_value=None)
+        mock_repo = Mock(spec=OrderRepository)
+        mock_repo.find_by_id_and_user = AsyncMock(return_value=None)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await OrderService.get_order_by_id("order_1", "user_1")
+        service = OrderService(order_repository=mock_repo)
 
-            assert exc.value.status_code == 404
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.get_order_by_id("order_1", "user_1")
+
+        assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_order_by_id_fails_wrong_user(self, mock_order_factory):
-        """Should raise 403 when order belongs to different user"""
+        """Should raise 404 when order belongs to different user"""
         # Arrange
-        order = mock_order_factory(id="order_1", user_id="user_2")
+        mock_repo = Mock(spec=OrderRepository)
+        mock_repo.find_by_id_and_user = AsyncMock(return_value=None)  # Returns None when user doesn't match
 
-        with patch("app.services.order_service.Order") as MockOrder:
-            MockOrder.get = AsyncMock(return_value=order)
+        service = OrderService(order_repository=mock_repo)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await OrderService.get_order_by_id("order_1", "user_1")
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.get_order_by_id("order_1", "user_1")
 
-            assert exc.value.status_code == 403
+        assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_all_orders(self, mock_order_factory):
-        """Should return all orders (admin function)"""
+        """Should return all orders as Order model objects (admin function)"""
         # Arrange
         orders = [
             mock_order_factory(user_id="user1"),
             mock_order_factory(user_id="user2"),
         ]
 
-        with patch("app.services.order_service.Order") as MockOrder:
-            MockOrder.find = MagicMock(return_value=QueryChain(orders))
+        mock_repo = Mock(spec=OrderRepository)
+        mock_repo.find_all = AsyncMock(return_value=orders)
 
-            # Act
-            result = await OrderService.get_all_orders()
+        service = OrderService(order_repository=mock_repo)
 
-            # Assert
-            assert len(result) == 2
+        # Act
+        result = await service.get_all_orders()
 
+        # Assert
+        assert len(result) == 2
+        assert result[0].user_id == "user1"
+        assert hasattr(result[0], 'id')  # MongoDB id field is included
+        mock_repo.find_all.assert_called_once()

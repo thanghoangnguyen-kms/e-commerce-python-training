@@ -5,10 +5,13 @@ Unit tests for CheckoutService.
 - Validation (empty cart, product issues)
 """
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import Mock, AsyncMock, patch
 from fastapi import HTTPException
 
 from app.services.checkout_service import CheckoutService
+from app.repositories.cart_repository import CartRepository
+from app.repositories.product_repository import ProductRepository
+from app.repositories.order_repository import OrderRepository
 
 
 class TestCheckoutService:
@@ -20,27 +23,36 @@ class TestCheckoutService:
     ):
         """Should create order and clear cart"""
         # Arrange
-        product = mock_product_factory(id="prod_1", name="Test", price=50.0, is_active=True)
-        cart_item = mock_cart_item_factory(product_id="prod_1", qty=2)
-        cart = mock_cart_factory(user_id="user_1", items=[cart_item])
+        product = mock_product_factory(id="prod_1", product_id=1, name="Test", price=50.0, is_active=True)
+        cart_item = mock_cart_item_factory(product_id=1, qty=2)  # Changed to integer
+        cart = mock_cart_factory(items=[cart_item])
         order = mock_order_factory(user_id="user_1", total=100.0)
+        
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.find_by_user_id = AsyncMock(return_value=cart)
+        mock_cart_repo.clear_cart = AsyncMock(return_value=cart)
+        
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=product)  # Changed to find_by_product_id
+        
+        mock_order_repo = Mock(spec=OrderRepository)
+        mock_order_repo.create = AsyncMock(return_value=order)
+        
+        service = CheckoutService(
+            cart_repository=mock_cart_repo,
+            product_repository=mock_product_repo,
+            order_repository=mock_order_repo
+        )
 
-        with patch("app.services.checkout_service.Cart") as MockCart, \
-             patch("app.services.checkout_service.Product") as MockProduct, \
-             patch("app.services.checkout_service.Order") as MockOrder:
-
-            MockCart.find_one = AsyncMock(return_value=cart)
-            MockProduct.get = AsyncMock(return_value=product)
-            MockOrder.return_value = order
-
+        # Mock Order model constructor
+        with patch("app.services.checkout_service.Order", return_value=order):
             # Act
-            result = await CheckoutService.create_order_from_cart("user_1")
+            result = await service.create_order_from_cart("user_1")
 
-            # Assert
-            assert result == order
-            order.insert.assert_awaited_once()
-            assert cart.items == []  # Cart cleared
-            cart.save.assert_awaited_once()
+        # Assert
+        assert result == order
+        mock_order_repo.create.assert_called_once()
+        mock_cart_repo.clear_cart.assert_called_once_with("user_1")
 
     @pytest.mark.asyncio
     async def test_create_order_calculates_total(
@@ -48,42 +60,54 @@ class TestCheckoutService:
     ):
         """Should calculate correct total from multiple items"""
         # Arrange
-        prod1 = mock_product_factory(id="p1", price=25.0, is_active=True)
-        prod2 = mock_product_factory(id="p2", price=50.0, is_active=True)
+        prod1 = mock_product_factory(id="p1", product_id=1, price=25.0, is_active=True)
+        prod2 = mock_product_factory(id="p2", product_id=2, price=50.0, is_active=True)
 
         items = [
-            mock_cart_item_factory(product_id="p1", qty=2),  # 50
-            mock_cart_item_factory(product_id="p2", qty=1),  # 50
+            mock_cart_item_factory(product_id=1, qty=2),  # 50
+            mock_cart_item_factory(product_id=2, qty=1),  # 50
         ]
         cart = mock_cart_factory(items=items)
         order = mock_order_factory()
+        
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.find_by_user_id = AsyncMock(return_value=cart)
+        mock_cart_repo.clear_cart = AsyncMock(return_value=cart)
+        
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(side_effect=[prod1, prod2])  # Changed to find_by_product_id
+        
+        mock_order_repo = Mock(spec=OrderRepository)
+        mock_order_repo.create = AsyncMock(return_value=order)
+        
+        service = CheckoutService(
+            cart_repository=mock_cart_repo,
+            product_repository=mock_product_repo,
+            order_repository=mock_order_repo
+        )
 
-        with patch("app.services.checkout_service.Cart") as MockCart, \
-             patch("app.services.checkout_service.Product") as MockProduct, \
-             patch("app.services.checkout_service.Order") as MockOrder:
-
-            MockCart.find_one = AsyncMock(return_value=cart)
-            MockProduct.get = AsyncMock(side_effect=[prod1, prod2])
-            MockOrder.return_value = order
-
+        # Mock Order model constructor
+        with patch("app.services.checkout_service.Order", return_value=order):
             # Act
-            await CheckoutService.create_order_from_cart("user_1")
+            await service.create_order_from_cart("user_1")
 
-            # Assert - total should be 100.0
-            order.insert.assert_awaited_once()
+        # Assert - total should be 100.0
+        mock_order_repo.create.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_order_fails_empty_cart(self):
         """Should raise 400 when cart is empty"""
         # Arrange
-        with patch("app.services.checkout_service.Cart") as MockCart:
-            MockCart.find_one = AsyncMock(return_value=None)
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.find_by_user_id = AsyncMock(return_value=None)
+        
+        service = CheckoutService(cart_repository=mock_cart_repo)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await CheckoutService.create_order_from_cart("user_1")
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.create_order_from_cart("user_1")
 
-            assert exc.value.status_code == 400
+        assert exc.value.status_code == 400
 
     @pytest.mark.asyncio
     async def test_create_order_fails_product_not_found(
@@ -91,20 +115,26 @@ class TestCheckoutService:
     ):
         """Should raise 400 when product doesn't exist"""
         # Arrange
-        cart_item = mock_cart_item_factory(product_id="nonexistent")
+        cart_item = mock_cart_item_factory(product_id=999)  # Changed to integer
         cart = mock_cart_factory(items=[cart_item])
 
-        with patch("app.services.checkout_service.Cart") as MockCart, \
-             patch("app.services.checkout_service.Product") as MockProduct:
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=None)  # Changed
 
-            MockCart.find_one = AsyncMock(return_value=cart)
-            MockProduct.get = AsyncMock(return_value=None)
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.find_by_user_id = AsyncMock(return_value=cart)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await CheckoutService.create_order_from_cart("user_1")
+        service = CheckoutService(
+            cart_repository=mock_cart_repo,
+            product_repository=mock_product_repo
+        )
 
-            assert exc.value.status_code == 400
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.create_order_from_cart("user_1")
+
+        assert exc.value.status_code == 400
+        assert "unavailable" in str(exc.value.detail).lower()
 
     @pytest.mark.asyncio
     async def test_create_order_fails_product_inactive(
@@ -112,20 +142,24 @@ class TestCheckoutService:
     ):
         """Should raise 400 when product is inactive"""
         # Arrange
-        product = mock_product_factory(id="prod_1", is_active=False)
-        cart_item = mock_cart_item_factory(product_id="prod_1")
+        product = mock_product_factory(id="prod_1", product_id=1, is_active=False)
+        cart_item = mock_cart_item_factory(product_id=1)
         cart = mock_cart_factory(items=[cart_item])
 
-        with patch("app.services.checkout_service.Cart") as MockCart, \
-             patch("app.services.checkout_service.Product") as MockProduct:
+        mock_product_repo = Mock(spec=ProductRepository)
+        mock_product_repo.find_by_product_id = AsyncMock(return_value=product)
 
-            MockCart.find_one = AsyncMock(return_value=cart)
-            MockProduct.get = AsyncMock(return_value=product)
+        mock_cart_repo = Mock(spec=CartRepository)
+        mock_cart_repo.find_by_user_id = AsyncMock(return_value=cart)
 
-            # Act & Assert
-            with pytest.raises(HTTPException) as exc:
-                await CheckoutService.create_order_from_cart("user_1")
+        service = CheckoutService(
+            cart_repository=mock_cart_repo,
+            product_repository=mock_product_repo
+        )
 
-            assert exc.value.status_code == 400
+        # Act & Assert
+        with pytest.raises(HTTPException) as exc:
+            await service.create_order_from_cart("user_1")
 
-
+        assert exc.value.status_code == 400
+        assert "unavailable" in str(exc.value.detail).lower()

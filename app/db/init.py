@@ -1,6 +1,5 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
-from typing import Optional
 import logging
 
 from app.db.models.user import User
@@ -17,8 +16,8 @@ class DatabaseManager:
     Singleton manager for MongoDB connection.
     Handles database initialization and cleanup.
     """
-    _instance: Optional['DatabaseManager'] = None
-    _client: Optional[AsyncIOMotorClient] = None
+    _instance: 'DatabaseManager | None' = None
+    _client: AsyncIOMotorClient | None = None
     _is_initialized: bool = False
 
     def __new__(cls):
@@ -88,7 +87,7 @@ class DatabaseManager:
         return self._is_initialized
 
     @property
-    def client(self) -> Optional[AsyncIOMotorClient]:
+    def client(self) -> AsyncIOMotorClient | None:
         """Get the MongoDB client instance (use sparingly, prefer Beanie models)."""
         return self._client
 

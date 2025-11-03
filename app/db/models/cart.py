@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 class CartItem(BaseModel):
-    product_id: str
+    product_id: int  # Changed from str to int - stores the integer product_id
     qty: int
 
 class Cart(Document):

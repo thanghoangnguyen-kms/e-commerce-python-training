@@ -7,7 +7,7 @@ with detailed performance logging, keeping service layer clean.
 import time
 import logging
 from functools import wraps
-from typing import Callable, Any, Optional
+from typing import Callable, Any
 from app.core.cache import cache_manager
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def cached(
     namespace: str,
     key_builder: Callable[..., str],
-    ttl: Optional[int] = None,
+    ttl: int | None = None,
     log_performance: bool = True
 ):
     """
@@ -102,7 +102,7 @@ def cached(
 
 def cache_result(
     namespace: str,
-    ttl: Optional[int] = None,
+    ttl: int | None = None,
     log_performance: bool = True
 ):
     """
@@ -198,24 +198,20 @@ def cache_result(
 
 async def invalidate_cache(namespace: str, pattern: str = "*") -> int:
     """
-    Helper function to invalidate cache entries.
+    Invalidate cache entries matching the pattern.
 
     Args:
         namespace: Cache namespace
-        pattern: Pattern to match (default: all keys in namespace)
+        pattern: Key pattern to match (supports wildcards)
 
     Returns:
         Number of keys deleted
 
     Example:
-        # Invalidate all product list caches
+        # Delete specific product cache
+        await invalidate_cache("products", "slug:gaming-laptop-pro")
+
+        # Delete all product list caches
         await invalidate_cache("products", "list:*")
-
-        # Invalidate specific product
-        await invalidate_cache("products", "slug:gaming-laptop")
     """
-    deleted = await cache_manager.delete_pattern(namespace, pattern)
-    if deleted > 0:
-        logger.info(f"🗑️  CACHE INVALIDATED [{namespace}]: Deleted {deleted} keys matching '{pattern}'")
-    return deleted
-
+    return await cache_manager.delete_pattern(namespace, pattern)
